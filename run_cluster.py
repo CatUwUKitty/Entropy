@@ -61,7 +61,14 @@ def check_solver_status(model):
         raise RuntimeError(f'MOSEK Fusion did not reach optimality. Status: {status}')
 import numpy as np
 import mosek.fusion as mf
+import scipy.sparse as sp
 num_threads = 12
+
+def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
+    """Filter near-zero values and convert to a MOSEK sparse matrix."""
+    cleaned = np.where(np.abs(matrix) > tol, matrix, 0.0)
+    coo = sp.coo_matrix(cleaned)
+    return mf.Matrix.sparse(coo.shape[0], coo.shape[1], coo.row.astype(np.int32), coo.col.astype(np.int32), coo.data.astype(np.float64))
 
 def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
     """
@@ -92,7 +99,8 @@ def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
             M.constraint(f'schur_{x}', mf.Expr.vstack(top, bot), mf.Domain.inPSDCone(2 * dE))
         sum_C = mf.Expr.add(C)
         M.constraint('sum_C_ub', mf.Expr.sub(mf.Expr.mul(k, I_d), sum_C), mf.Domain.inPSDCone(dE))
-        trace_terms = [mf.Expr.dot(B[x], mf.Matrix.dense(rho_blocks[x])) for x in range(nX)]
+        rho_sparse = [to_mosek_sparse(b) for b in rho_blocks]
+        trace_terms = [mf.Expr.dot(B[x], rho_sparse[x]) for x in range(nX)]
         total_trace = mf.Expr.add(trace_terms)
         obj = mf.Expr.sub(mf.Expr.sub(mf.Expr.mul(2.0, total_trace), mf.Expr.mul(2.0 * epsilon, t)), k)
         M.objective('obj', mf.ObjectiveSense.Maximize, obj)
@@ -150,3 +158,18 @@ def generate_werner_cq_blocks(W, n=1):
 blocks_2copy = generate_werner_cq_blocks(W=0.85, n=4)
 res_2copy = measured_smooth_collision_entropy(rho_blocks=blocks_2copy, epsilon=0.001)
 print(f"H2 (4 copies): {res_2copy['entropy']:.6f} bits | Q*: {res_2copy['Q_star']:.8f}")
+zero = np.array([1, 0], dtype=complex)
+one = np.array([0, 1], dtype=complex)
+plus = (zero + one) / np.sqrt(2)
+proj_0 = np.outer(zero, zero.conj())
+proj_1 = np.outer(one, one.conj())
+proj_plus = np.outer(plus, plus.conj())
+identity = np.eye(2, dtype=complex)
+test_states = {'Perfect Correlation (H2 = 0)': [0.5 * proj_0, 0.5 * proj_1], 'Uniform Independent (H2 = 1)': [0.5 * proj_0, 0.5 * proj_0]}
+epsilon = 0.001
+header = f"{'Sanity Check':<42} | {'Status':<10} | {'Q*':<14} | {'H2 (bits)':<12}"
+print(header)
+print('-' * len(header))
+for name, blocks in test_states.items():
+    res = measured_smooth_collision_entropy(rho_blocks=blocks, epsilon=epsilon)
+    print(f"{name:<42} | {res['status']:<10} | {res['Q_star']:<14.10f} | {res['entropy']:<12.6f}")
