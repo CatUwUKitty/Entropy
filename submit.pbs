@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -P Entropy
+#PBS -q parallel
+#PBS -l select=1:ncpus=24:mem=32gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -N EntropyRun
+
+cd ${PBS_O_WORKDIR}
+
+# 1. Load shared C/system dependencies
+source /app1/ebenv Python-3.10.4
+
+# 2. Prevent the cluster's older SciPy modules from overriding your venv
+unset PYTHONPATH
+
+# 3. Activate your virtual environment
+source ${HOME}/myenv/bin/activate
+
+# 4. Set MOSEK license path
+export MOSEKLM_LICENSE_FILE="${HOME}/mosek/mosek.lic"
+
+# 5. Run the code using your venv interpreter
+${HOME}/myenv/bin/python3 run_cluster.py 
+
+exit $?
