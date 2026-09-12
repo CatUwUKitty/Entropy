@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -P Entropy
 #PBS -q parallel
-#PBS -l select=1:ncpus=4:mem=24gb
+#PBS -l select=1:ncpus=12:mem=48gb
 #PBS -l walltime=04:00:00
 #PBS -j oe
 #PBS -N EntropyRun
@@ -9,6 +9,15 @@
 #PBS -M e1398082@u.nus.edu
 
 cd ${PBS_O_WORKDIR}
+
+# Prevent glibc multi-arena virtual memory explosion
+export MALLOC_ARENA_MAX= 12
+
+# Limit runtime thread pools to requested ncpus
+export OMP_NUM_THREADS=12
+export OPENBLAS_NUM_THREADS=12
+export MKL_NUM_THREADS=12
+export NUMEXPR_NUM_THREADS=12
 
 # 1. Load shared C/system dependencies
 source /app1/ebenv Python-3.10.4

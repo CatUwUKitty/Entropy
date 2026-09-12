@@ -61,6 +61,7 @@ def check_solver_status(model):
         raise RuntimeError(f'MOSEK Fusion did not reach optimality. Status: {status}')
 import numpy as np
 import mosek.fusion as mf
+num_threads = 12
 
 def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
     """
@@ -74,6 +75,7 @@ def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
         raise NotImplementedError('Density matrix blocks contain non-zero imaginary components. MOSEK Fusion operates on real cones. Real-embedding is required for complex states.')
     rho_blocks = [np.ascontiguousarray(np.real(b), dtype=np.float64) for b in rho_blocks]
     with mf.Model('measured_smooth_h2') as M:
+        M.setSolverParam('numThreads', num_threads)
         if verbose:
             M.setLogHandler(sys.stdout)
         B = [M.variable(f'B_{x}', mf.Domain.inPSDCone(dE)) for x in range(nX)]
@@ -145,6 +147,6 @@ def generate_werner_cq_blocks(W, n=1):
     for _ in range(1, n):
         blocks = [np.kron(b, t) for b in blocks for t in tau_single]
     return blocks
-blocks_2copy = generate_werner_cq_blocks(W=0.85, n=4)
+blocks_2copy = generate_werner_cq_blocks(W=0.85, n=1)
 res_2copy = measured_smooth_collision_entropy(rho_blocks=blocks_2copy, epsilon=0.001)
 print(f"H2 (4 copies): {res_2copy['entropy']:.6f} bits | Q*: {res_2copy['Q_star']:.8f}")
