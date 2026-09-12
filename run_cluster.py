@@ -147,6 +147,6 @@ def generate_werner_cq_blocks(W, n=1):
     for _ in range(1, n):
         blocks = [np.kron(b, t) for b in blocks for t in tau_single]
     return blocks
-blocks_2copy = generate_werner_cq_blocks(W=0.85, n=1)
+blocks_2copy = generate_werner_cq_blocks(W=0.85, n=4)
 res_2copy = measured_smooth_collision_entropy(rho_blocks=blocks_2copy, epsilon=0.001)
 print(f"H2 (4 copies): {res_2copy['entropy']:.6f} bits | Q*: {res_2copy['Q_star']:.8f}")

@@ -11,7 +11,7 @@
 cd ${PBS_O_WORKDIR}
 
 # Prevent glibc multi-arena virtual memory explosion
-export MALLOC_ARENA_MAX= 12
+export MALLOC_ARENA_MAX=12
 
 # Limit runtime thread pools to requested ncpus
 export OMP_NUM_THREADS=12
