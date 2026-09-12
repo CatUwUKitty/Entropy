@@ -1,10 +1,12 @@
 #!/bin/bash
 #PBS -P Entropy
-#PBS -q parallel
-#PBS -l select=1:ncpus=24:mem=32gb
+#PBS -q serial
+#PBS -l select=1:ncpus=1:mem=2gb
 #PBS -l walltime=02:00:00
 #PBS -j oe
 #PBS -N EntropyRun
+#PBS -m bea
+#PBS -M e1398082@u.nus.edu
 
 cd ${PBS_O_WORKDIR}
 
