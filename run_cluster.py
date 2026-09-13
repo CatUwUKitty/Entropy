@@ -62,7 +62,7 @@ def check_solver_status(model):
 import numpy as np
 import mosek.fusion as mf
 import scipy.sparse as sp
-num_threads = 12
+num_threads = 4
 
 def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
     """Filter near-zero values and convert to a MOSEK sparse matrix."""
