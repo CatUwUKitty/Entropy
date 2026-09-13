@@ -62,8 +62,6 @@ def check_solver_status(model):
 import numpy as np
 import mosek.fusion as mf
 import scipy.sparse as sp
-num_threads = 4
-max_RAM = 64
 
 def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
     """Filter near-zero values and convert to a MOSEK sparse matrix."""
@@ -71,50 +69,58 @@ def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
     mask = np.abs(coo.data) > tol
     return mf.Matrix.sparse(coo.shape[0], coo.shape[1], coo.row[mask].astype(np.int32), coo.col[mask].astype(np.int32), coo.data[mask].astype(np.float64))
 
-def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
+def measured_smooth_collision_entropy_fast(n, W=0.85, epsilon=0.001, num_threads=4, verbose=False):
     """
-    Compute H_2^{epsilon,M,up}(X|E) using Eq. (B8) via MOSEK Fusion.
-    rho_blocks[x] = p(x) rho_{E|x}.
+    Exploits the physical bit-flip unitary symmetry U = diag(1, -1, 1, -1).
+    Since U_x tau_0 U_x = tau_x, setting B_x = U_x B_0 U_x and C_x = U_x C_0 U_x
+    satisfies all constraints identically and collapses 2^n variable pairs (B_x, C_x)
+    down to a single pair (B_0, C_0). The coupling sum_x C_x becomes a commutant projection.
     """
-    rho_blocks = validate_cq_blocks(rho_blocks)
-    nX = len(rho_blocks)
-    dE = rho_blocks[0].shape[0]
-    if not all((np.allclose(np.asarray(b).imag, 0) for b in rho_blocks)):
-        raise NotImplementedError('Density matrix blocks contain non-zero imaginary components. MOSEK Fusion operates on real cones. Real-embedding is required for complex states.')
-    rho_blocks = [np.ascontiguousarray(np.real(b), dtype=np.float64) for b in rho_blocks]
-    with mf.Model('measured_smooth_h2') as M:
+    dE = 4 ** n
+    nX = 2 ** n
+    u_single = np.array([1, -1, 1, -1], dtype=float)
+    signs = []
+    for k in range(n):
+        rep = np.kron(np.ones(4 ** k), np.kron(u_single, np.ones(4 ** (n - 1 - k))))
+        signs.append(rep)
+    twirl_mask = np.ones((dE, dE), dtype=float)
+    for q in range(n):
+        s = signs[q]
+        twirl_mask *= 1.0 + s[:, None] * s[None, :]
+    blocks_1 = generate_werner_cq_blocks(W=W, n=1)
+    tau0_single = blocks_1[0].real
+    tau0 = tau0_single
+    for _ in range(1, n):
+        tau0 = np.kron(tau0, tau0_single)
+    with mf.Model(f'ms_h2_sym_n{n}') as M:
         M.setSolverParam('numThreads', num_threads)
-        M.setSolverParam('maxMemory', max_RAM * 1000)
+        M.setSolverParam('intpntSolveForm', 'primal')
         if verbose:
+            import sys
             M.setLogHandler(sys.stdout)
-        B = [M.variable(f'B_{x}', mf.Domain.inPSDCone(dE)) for x in range(nX)]
-        C = [M.variable(f'C_{x}', mf.Domain.inSymmetricMatrix(dE)) for x in range(nX)]
+        B0 = M.variable('B0', mf.Domain.inPSDCone(dE))
+        C0 = M.variable('C0', mf.Domain.inPSDCone(dE))
         t = M.variable('t', mf.Domain.unbounded())
         k = M.variable('k', mf.Domain.unbounded())
         I_d = mf.Matrix.eye(dE)
         I_expr = mf.Expr.constTerm(I_d)
-        for x in range(nX):
-            M.constraint(f'B_ub_{x}', mf.Expr.sub(mf.Expr.mul(t, I_d), B[x]), mf.Domain.inPSDCone(dE))
-        for x in range(nX):
-            top = mf.Expr.hstack(C[x], B[x])
-            bot = mf.Expr.hstack(B[x], I_expr)
-            M.constraint(f'schur_{x}', mf.Expr.vstack(top, bot), mf.Domain.inPSDCone(2 * dE))
-        sum_C = mf.Expr.add(C)
+        M.constraint('B0_ub', mf.Expr.sub(mf.Expr.mul(t, I_d), B0), mf.Domain.inPSDCone(dE))
+        top = mf.Expr.hstack(C0, B0)
+        bot = mf.Expr.hstack(B0, I_expr)
+        M.constraint('schur0', mf.Expr.vstack(top, bot), mf.Domain.inPSDCone(2 * dE))
+        mask_sparse = to_mosek_sparse(twirl_mask)
+        sum_C = mf.Expr.mulElm(mask_sparse, C0)
         M.constraint('sum_C_ub', mf.Expr.sub(mf.Expr.mul(k, I_d), sum_C), mf.Domain.inPSDCone(dE))
-        rho_sparse = [to_mosek_sparse(b) for b in rho_blocks]
-        trace_terms = [mf.Expr.dot(B[x], rho_sparse[x]) for x in range(nX)]
-        total_trace = mf.Expr.add(trace_terms)
-        obj = mf.Expr.sub(mf.Expr.sub(mf.Expr.mul(2.0, total_trace), mf.Expr.mul(2.0 * epsilon, t)), k)
+        coeff = 2.0 * float(nX)
+        tau0_sparse = to_mosek_sparse(tau0)
+        tr0 = mf.Expr.dot(B0, tau0_sparse)
+        obj = mf.Expr.sub(mf.Expr.sub(mf.Expr.mul(coeff, tr0), mf.Expr.mul(2.0 * epsilon, t)), k)
         M.objective('obj', mf.ObjectiveSense.Maximize, obj)
         M.solve()
-        check_solver_status(M)
         Q_star = float(M.primalObjValue())
-        if Q_star <= 0:
-            raise RuntimeError(f'Expected Q* > 0, got {Q_star}.')
-        t_val = float(t.level()[0])
-        k_val = float(k.level()[0])
+        status = str(M.getProblemStatus())
     H2 = -np.log2(Q_star)
-    return {'entropy': H2, 'Q_star': Q_star, 't': t_val, 'k': k_val, 'status': 'OPTIMAL'}
+    return {'status': status, 'Q_star': Q_star, 'entropy': H2}
 import numpy as np
 
 def partial_trace_AB(rho_ABE):
@@ -157,9 +163,10 @@ def generate_werner_cq_blocks(W, n=1):
     for _ in range(1, n):
         blocks = [np.kron(b, t) for b in blocks for t in tau_single]
     return blocks
-blocks_2copy = generate_werner_cq_blocks(W=0.85, n=4)
-res_2copy = measured_smooth_collision_entropy(rho_blocks=blocks_2copy, epsilon=0.001)
-print(f"H2 (4 copies): {res_2copy['entropy']:.6f} bits | Q*: {res_2copy['Q_star']:.8f}")
+W = 0.85
+for n in range(1, 5):
+    res = measured_smooth_collision_entropy_fast(n=n, W=W, epsilon=0.001, num_threads=12)
+    print(f"H2, W = {W} ({n} copies): {res['entropy']:.6f} bits | Q*: {res['Q_star']:.8f}")
 zero = np.array([1, 0], dtype=complex)
 one = np.array([0, 1], dtype=complex)
 plus = (zero + one) / np.sqrt(2)
