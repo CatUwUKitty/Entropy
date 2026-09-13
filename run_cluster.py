@@ -63,12 +63,13 @@ import numpy as np
 import mosek.fusion as mf
 import scipy.sparse as sp
 num_threads = 4
+max_RAM = 64
 
 def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
     """Filter near-zero values and convert to a MOSEK sparse matrix."""
-    cleaned = np.where(np.abs(matrix) > tol, matrix, 0.0)
-    coo = sp.coo_matrix(cleaned)
-    return mf.Matrix.sparse(coo.shape[0], coo.shape[1], coo.row.astype(np.int32), coo.col.astype(np.int32), coo.data.astype(np.float64))
+    coo = sp.coo_matrix(matrix)
+    mask = np.abs(coo.data) > tol
+    return mf.Matrix.sparse(coo.shape[0], coo.shape[1], coo.row[mask].astype(np.int32), coo.col[mask].astype(np.int32), coo.data[mask].astype(np.float64))
 
 def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
     """
@@ -83,10 +84,11 @@ def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
     rho_blocks = [np.ascontiguousarray(np.real(b), dtype=np.float64) for b in rho_blocks]
     with mf.Model('measured_smooth_h2') as M:
         M.setSolverParam('numThreads', num_threads)
+        M.setSolverParam('maxMemory', max_RAM * 1000)
         if verbose:
             M.setLogHandler(sys.stdout)
         B = [M.variable(f'B_{x}', mf.Domain.inPSDCone(dE)) for x in range(nX)]
-        C = [M.variable(f'C_{x}', mf.Domain.inPSDCone(dE)) for x in range(nX)]
+        C = [M.variable(f'C_{x}', mf.Domain.inSymmetricMatrix(dE)) for x in range(nX)]
         t = M.variable('t', mf.Domain.unbounded())
         k = M.variable('k', mf.Domain.unbounded())
         I_d = mf.Matrix.eye(dE)
