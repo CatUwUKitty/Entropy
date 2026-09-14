@@ -1,9 +1,5 @@
 import os
-import sys
 from pathlib import Path
-import numpy as np
-import mosek
-import mosek.fusion as mf
 
 def setup_mosek_license():
     """Ensure MOSEK can locate a valid license file on the cluster."""
@@ -20,107 +16,62 @@ def setup_mosek_license():
 setup_mosek_license()
 
 
-import os
-import sys
-from pathlib import Path
 import numpy as np
-import mosek
-import mosek.fusion as mf
+import cvxpy as cp
 
 def validate_cq_blocks(rho_blocks, tol=1e-09):
     """Validate and clean subnormalized CQ blocks."""
     if not rho_blocks:
         raise ValueError('rho_blocks cannot be empty.')
-    is_real = all((np.allclose(np.asarray(rho).imag, 0, atol=tol) for rho in rho_blocks))
-    dtype = np.float64 if is_real else complex
-    blocks = [np.asarray(rho.real if is_real else rho, dtype=dtype) for rho in rho_blocks]
+    blocks = [np.asarray(rho, dtype=complex) for rho in rho_blocks]
     dE = blocks[0].shape[0]
     for x, rho in enumerate(blocks):
         if rho.shape != (dE, dE):
-            raise ValueError(f'Block {x} has inconsistent dimensions: expected ({dE}, {dE}), got {rho.shape}.')
-        if is_real:
-            if not np.allclose(rho, rho.T, atol=tol):
-                raise ValueError(f'Block {x} is not symmetric.')
-            blocks[x] = (rho + rho.T) / 2
-        else:
-            if not np.allclose(rho, rho.conj().T, atol=tol):
-                raise ValueError(f'Block {x} is not Hermitian.')
-            blocks[x] = (rho + rho.conj().T) / 2
-        min_eig = np.min(np.linalg.eigvalsh(blocks[x]))
-        if min_eig < -tol:
-            raise ValueError(f'Block {x} is not positive semidefinite (min eigenvalue = {min_eig}).')
+            raise ValueError(f'Block {x} has inconsistent dimensions.')
+        if not np.allclose(rho, rho.conj().T, atol=tol):
+            raise ValueError(f'Block {x} is not Hermitian.')
+        blocks[x] = (rho + rho.conj().T) / 2
+        if np.min(np.linalg.eigvalsh(blocks[x])) < -tol:
+            raise ValueError(f'Block {x} is not positive semidefinite.')
     total_trace = sum((np.trace(rho).real for rho in blocks))
     if not np.isclose(total_trace, 1.0, atol=tol):
         raise ValueError(f'CQ blocks must have total trace 1, got {total_trace}.')
     return blocks
 
-def check_solver_status(model):
-    """Check whether the MOSEK Fusion SDP was solved successfully."""
-    status = model.getPrimalSolutionStatus()
-    if status != mf.SolutionStatus.Optimal:
-        raise RuntimeError(f'MOSEK Fusion did not reach optimality. Status: {status}')
-import numpy as np
-import mosek.fusion as mf
-import scipy.sparse as sp
+def check_solver_status(problem):
+    """Check whether the SDP was solved successfully."""
+    if problem.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+        raise RuntimeError(f'Solver returned status: {problem.status}')
+    if problem.value is None or not np.isfinite(problem.value):
+        raise RuntimeError('Solver did not return a finite optimum.')
+    if problem.value <= 0:
+        raise RuntimeError(f'Expected Q* > 0, got {problem.value}.')
 
-def to_mosek_sparse(matrix: np.ndarray, tol: float=1e-12) -> mf.Matrix:
-    """Filter near-zero values and convert to a MOSEK sparse matrix."""
-    coo = sp.coo_matrix(matrix)
-    mask = np.abs(coo.data) > tol
-    return mf.Matrix.sparse(coo.shape[0], coo.shape[1], coo.row[mask].astype(np.int32), coo.col[mask].astype(np.int32), coo.data[mask].astype(np.float64))
-
-def measured_smooth_collision_entropy_fast(n, W=0.85, epsilon=0.001, num_threads=4, verbose=False):
+def measured_smooth_collision_entropy(rho_blocks, epsilon=0.001, verbose=False):
     """
-    Exploits the physical bit-flip unitary symmetry U = diag(1, -1, 1, -1).
-    Since U_x tau_0 U_x = tau_x, setting B_x = U_x B_0 U_x and C_x = U_x C_0 U_x
-    satisfies all constraints identically and collapses 2^n variable pairs (B_x, C_x)
-    down to a single pair (B_0, C_0). The coupling sum_x C_x becomes a commutant projection.
+    Compute H_2^{epsilon,M,up}(X|E) using Eq. (B8).
+    rho_blocks[x] = p(x) rho_{E|x}.
     """
-    dE = 4 ** n
-    nX = 2 ** n
-    u_single = np.array([1, -1, 1, -1], dtype=float)
-    signs = []
-    for k in range(n):
-        rep = np.kron(np.ones(4 ** k), np.kron(u_single, np.ones(4 ** (n - 1 - k))))
-        signs.append(rep)
-    twirl_mask = np.ones((dE, dE), dtype=float)
-    for q in range(n):
-        s = signs[q]
-        twirl_mask *= 1.0 + s[:, None] * s[None, :]
-    blocks_1 = generate_werner_cq_blocks(W=W, n=1)
-    tau0_single = blocks_1[0].real
-    tau0 = tau0_single
-    for _ in range(1, n):
-        tau0 = np.kron(tau0, tau0_single)
-    with mf.Model(f'ms_h2_sym_n{n}') as M:
-        M.setSolverParam('numThreads', num_threads)
-        M.setSolverParam('intpntSolveForm', 'primal')
-        if verbose:
-            import sys
-            M.setLogHandler(sys.stdout)
-        B0 = M.variable('B0', mf.Domain.inPSDCone(dE))
-        C0 = M.variable('C0', mf.Domain.inPSDCone(dE))
-        t = M.variable('t', mf.Domain.unbounded())
-        k = M.variable('k', mf.Domain.unbounded())
-        I_d = mf.Matrix.eye(dE)
-        I_expr = mf.Expr.constTerm(I_d)
-        M.constraint('B0_ub', mf.Expr.sub(mf.Expr.mul(t, I_d), B0), mf.Domain.inPSDCone(dE))
-        top = mf.Expr.hstack(C0, B0)
-        bot = mf.Expr.hstack(B0, I_expr)
-        M.constraint('schur0', mf.Expr.vstack(top, bot), mf.Domain.inPSDCone(2 * dE))
-        mask_sparse = to_mosek_sparse(twirl_mask)
-        sum_C = mf.Expr.mulElm(mask_sparse, C0)
-        M.constraint('sum_C_ub', mf.Expr.sub(mf.Expr.mul(k, I_d), sum_C), mf.Domain.inPSDCone(dE))
-        coeff = 2.0 * float(nX)
-        tau0_sparse = to_mosek_sparse(tau0)
-        tr0 = mf.Expr.dot(B0, tau0_sparse)
-        obj = mf.Expr.sub(mf.Expr.sub(mf.Expr.mul(coeff, tr0), mf.Expr.mul(2.0 * epsilon, t)), k)
-        M.objective('obj', mf.ObjectiveSense.Maximize, obj)
-        M.solve()
-        Q_star = float(M.primalObjValue())
-        status = str(M.getProblemStatus())
+    rho_blocks = validate_cq_blocks(rho_blocks)
+    nX = len(rho_blocks)
+    dE = rho_blocks[0].shape[0]
+    I = np.eye(dE)
+    B = [cp.Variable((dE, dE), hermitian=True) for _ in range(nX)]
+    C = [cp.Variable((dE, dE), hermitian=True) for _ in range(nX)]
+    t = cp.Variable()
+    k = cp.Variable()
+    constraints = []
+    for x in range(nX):
+        constraints += [B[x] >> 0, B[x] << t * I, cp.bmat([[C[x], B[x]], [B[x], I]]) >> 0]
+    constraints += [sum(C) << k * I]
+    trace_term = sum((cp.real(cp.trace(B[x] @ rho_blocks[x])) for x in range(nX)))
+    objective = cp.Maximize(2 * trace_term - 2 * epsilon * t - k)
+    problem = cp.Problem(objective, constraints)
+    problem.solve(solver=cp.SCS, verbose=verbose, canon_backend=cp.SCIPY_CANON_BACKEND)
+    check_solver_status(problem)
+    Q_star = float(problem.value)
     H2 = -np.log2(Q_star)
-    return {'status': status, 'Q_star': Q_star, 'entropy': H2}
+    return {'entropy': H2, 'Q_star': Q_star, 'B': [Bx.value for Bx in B], 'C': [Cx.value for Cx in C], 't': t.value, 'k': k.value, 'status': problem.status}
 import numpy as np
 
 def partial_trace_AB(rho_ABE):
@@ -164,21 +115,8 @@ def generate_werner_cq_blocks(W, n=1):
         blocks = [np.kron(b, t) for b in blocks for t in tau_single]
     return blocks
 W = 0.85
-for n in range(1, 5):
-    res = measured_smooth_collision_entropy_fast(n=n, W=W, epsilon=0.001, num_threads=12)
-    print(f"H2, W = {W} ({n} copies): {res['entropy']:.6f} bits | Q*: {res['Q_star']:.8f}")
-zero = np.array([1, 0], dtype=complex)
-one = np.array([0, 1], dtype=complex)
-plus = (zero + one) / np.sqrt(2)
-proj_0 = np.outer(zero, zero.conj())
-proj_1 = np.outer(one, one.conj())
-proj_plus = np.outer(plus, plus.conj())
-identity = np.eye(2, dtype=complex)
-test_states = {'Perfect Correlation (H2 = 0)': [0.5 * proj_0, 0.5 * proj_1], 'Uniform Independent (H2 = 1)': [0.5 * proj_0, 0.5 * proj_0]}
-epsilon = 0.001
-header = f"{'Sanity Check':<42} | {'Status':<10} | {'Q*':<14} | {'H2 (bits)':<12}"
-print(header)
-print('-' * len(header))
-for name, blocks in test_states.items():
-    res = measured_smooth_collision_entropy(rho_blocks=blocks, epsilon=epsilon)
-    print(f"{name:<42} | {res['status']:<10} | {res['Q_star']:<14.10f} | {res['entropy']:<12.6f}")
+num_Copies = 2
+for i in range(1, num_Copies + 1):
+    blocks = generate_werner_cq_blocks(W=0.85, n=num_Copies)
+    res = measured_smooth_collision_entropy(rho_blocks=blocks, epsilon=0.001)
+    print(f"H2 ({i} copies): {res['entropy']:.6f} bits | Q*: {res['Q_star']:.8f}")
