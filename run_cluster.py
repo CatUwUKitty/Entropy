@@ -98,7 +98,7 @@ def print_comparison(max_n):
 import gc
 W = 0.85
 epsilon = 0.001
-n_max = 3
+n_max = 8
 for n in range(1, n_max + 1):
     res = solve_werner_reduced(W=W, epsilon=epsilon, n=n, solver='MOSEK', tol=1e-07)
     print(f"H2 ({n} copies): {res['H_bits']:.6f} bits | {res['H_bits'] / n:.6f} bits/copy | time: {res['solve_time']:.4f} s | Q*: {res['q']:.8f}")
