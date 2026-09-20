@@ -1,5 +1,9 @@
 import os
+import sys
 from pathlib import Path
+import numpy as np
+import mosek
+import mosek.fusion as mf
 
 def setup_mosek_license():
     """Ensure MOSEK can locate a valid license file on the cluster."""
@@ -19,16 +23,6 @@ setup_mosek_license()
 import os
 import sys
 from pathlib import Path
-if 'google.colab' in sys.modules or 'COLAB_RELEASE_TAG' in os.environ:
-    get_ipython().system('pip -q install Mosek numpy')
-    from google.colab import drive
-    drive.mount('/content/drive')
-    os.environ['MOSEKLM_LICENSE_FILE'] = '/content/drive/MyDrive/mosek.lic'
-else:
-    license_path = Path.home() / 'mosek' / 'mosek.lic'
-    if license_path.exists():
-        os.environ['MOSEKLM_LICENSE_FILE'] = str(license_path)
-    print(f'Local environment ready. MOSEK license configured at: {license_path}')
 'Exact symmetry reduction of the supplied Werner CQ collision-entropy SDP.\n'
 from math import comb
 import warnings
@@ -103,7 +97,7 @@ def print_comparison(max_n):
         print(f'{n:2d} {original:22,d} {reduced:22,d} {2 * d * d:14,d} / {d:,}')
 W = 0.85
 epsilon = 0.001
-n = 6
+n = 7
 result = solve_werner_reduced(W=W, epsilon=epsilon, n=n, solver='MOSEK', tol=1e-07)
 print('status:', result['status'])
 print('q_epsilon:', result['q'])
@@ -112,4 +106,7 @@ print('entropy per copy:', result['H_bits'] / n)
 print('solver time [s]:', result['solve_time'])
 print('scaled PSD violation:', result['psd_violation'])
 print('scaled squared-column-norm violation:', result['column_squared_norm_violation'])
+del result
 print_comparison(10)
+import gc
+gc.collect()
