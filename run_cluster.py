@@ -62,8 +62,8 @@ def solve_werner_reduced(W=0.85, epsilon=0.001, n=1, solver='CLARABEL', verbose=
             rr = np.kron(rr, M[sector])
         R.append(rr)
         constraints += [ar >> 0, T * I - ar >> 0]
-        tails = cp.reshape(K - 1, (1, 1), order='C') @ np.ones((1, d))
-        constraints.append(cp.SOC((K + 1) * np.ones(d), cp.vstack([2 * ar, tails]), axis=0))
+        for col_idx in range(d):
+            constraints.append(cp.SOC(K + 1, cp.hstack([2 * ar[:, col_idx], K - 1])))
     overlap = sum((comb(n, r) * cp.trace(ar @ rr) for r, (ar, rr) in enumerate(zip(A, R))))
     problem = cp.Problem(cp.Maximize(2 * overlap - 2 * epsilon * T - K), constraints)
     solver = solver.upper()
@@ -86,7 +86,7 @@ def solve_werner_reduced(W=0.85, epsilon=0.001, n=1, solver='CLARABEL', verbose=
     scaled_q = float(problem.value)
     if not np.isfinite(scaled_q) or scaled_q <= 0:
         raise RuntimeError('Nonpositive/nonfinite optimum; cannot reliably compute entropy.')
-    return dict(q=scaled_q / d, H_bits=n - np.log2(scaled_q), status=problem.status, A=values, T=tv, K=kv, psd_violation=psd_violation, column_squared_norm_violation=norm_violation, solve_time=problem.solver_stats.solve_time, problem=problem)
+    return dict(q=scaled_q / d, H_bits=n - np.log2(scaled_q), status=problem.status, A=values, T=tv, K=kv, solve_time=problem.solver_stats.solve_time, problem=problem)
 
 def print_comparison(max_n):
     print(' n   baseline matrix vars   reduced matrix vars   baseline/reduced max PSD order')
@@ -95,18 +95,12 @@ def print_comparison(max_n):
         original = d * (d * d) * (d * d + 1)
         reduced = (n + 1) * d * (d + 1) // 2
         print(f'{n:2d} {original:22,d} {reduced:22,d} {2 * d * d:14,d} / {d:,}')
+import gc
 W = 0.85
 epsilon = 0.001
-n = 7
-result = solve_werner_reduced(W=W, epsilon=epsilon, n=n, solver='MOSEK', tol=1e-07)
-print('status:', result['status'])
-print('q_epsilon:', result['q'])
-print('entropy [bits]:', result['H_bits'])
-print('entropy per copy:', result['H_bits'] / n)
-print('solver time [s]:', result['solve_time'])
-print('scaled PSD violation:', result['psd_violation'])
-print('scaled squared-column-norm violation:', result['column_squared_norm_violation'])
-del result
-print_comparison(10)
-import gc
-gc.collect()
+n_max = 3
+for n in range(1, n_max + 1):
+    res = solve_werner_reduced(W=W, epsilon=epsilon, n=n, solver='MOSEK', tol=1e-07)
+    print(f"H2 ({n} copies): {res['H_bits']:.6f} bits | {res['H_bits'] / n:.6f} bits/copy | time: {res['solve_time']:.4f} s | Q*: {res['q']:.8f}")
+    del res
+    gc.collect()
