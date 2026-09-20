@@ -72,7 +72,7 @@ def solve_werner_reduced(W=0.85, epsilon=0.001, n=1, solver='CLARABEL', verbose=
         options = dict(tol_gap_abs=tol, tol_gap_rel=tol, tol_feas=tol, max_iter=300)
     elif solver == 'SCS':
         options = dict(eps=tol, max_iters=200000)
-    problem.solve(solver=solver, verbose=verbose, **options)
+    problem.solve(solver=solver, verbose=verbose, canon_backend=cp.SCIPY_CANON_BACKEND, **options)
     if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise RuntimeError(f'Solver status: {problem.status}')
     if problem.status == cp.OPTIMAL_INACCURATE:
