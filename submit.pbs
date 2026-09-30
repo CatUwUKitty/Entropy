@@ -4,34 +4,17 @@
 #PBS -l select=1:ncpus=12:mem=64gb
 #PBS -l walltime=240:00:00
 #PBS -j oe
-#PBS -N EntropyRun
-#PBS -m ae
-#PBS -M e1398082@u.nus.edu
+#PBS -N EntropySweep
 
-cd ${PBS_O_WORKDIR}
-
-# Prevent glibc multi-arena virtual memory explosion
+cd "${PBS_O_WORKDIR}" || exit 1
 export MALLOC_ARENA_MAX=12
-
-# Limit runtime thread pools to requested ncpus
 export OMP_NUM_THREADS=12
 export OPENBLAS_NUM_THREADS=12
 export MKL_NUM_THREADS=12
 export NUMEXPR_NUM_THREADS=12
-
-# 1. Load shared C/system dependencies
-source /app1/ebenv Python-3.10.4
-
-# 2. Prevent the cluster's older SciPy modules from overriding your venv
+source /app1/ebenv Python-3.10.4 || exit 1
 unset PYTHONPATH
-
-# 3. Activate your virtual environment
-source ${HOME}/myenv/bin/activate
-
-# 4. Set MOSEK license path
+source "${HOME}/myenv/bin/activate" || exit 1
 export MOSEKLM_LICENSE_FILE="${HOME}/mosek/mosek.lic"
-
-# 5. Run the code using your venv interpreter
-${HOME}/myenv/bin/python3 run_cluster.py 
-
+"${HOME}/myenv/bin/python3" run_cluster.py 
 exit $?
