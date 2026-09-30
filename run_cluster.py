@@ -213,22 +213,3 @@ for test in range(1, test_max + 1):
     blocks = generate_werner_cq_blocks(W=W, n=test)
     res = sanity_measured_smooth_collision_entropy(rho_blocks=blocks, epsilon=0.001)
     print(f"Sanity H2 ({test} copies): {res['entropy']:.6f} bits | {res['entropy'] / test:.6f} bits/copy | Q*: {res['Q_star']:.8f}")
-import matplotlib.pyplot as plt
-import pandas as pd
-data = {'n': [1, 2, 3, 4, 5, 6, 7, 8], 'H_bits': [0.72758865, 1.40981563, 2.07045609, 2.71752947, 3.3556264, 3.98684776, 4.612885, 5.234714], 'bits_per_copy': [0.727589, 0.704908, 0.690152, 0.679382, 0.671125, 0.664475, 0.658984, 0.654339], 'status': ['optimal'] * 8}
-df = pd.DataFrame(data)
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
-ax1.plot(df['n'], df['H_bits'], marker='o', color='#1f77b4', linewidth=2)
-ax1.set_title('$W=0.85$, $\\epsilon=10^{-3}$,  $H$ vs $n$')
-ax1.set_xlabel('$n$ (copies)')
-ax1.set_ylabel('$H$ (bits)')
-ax1.grid(True, linestyle='--', alpha=0.6)
-ax1.set_xticks(df['n'])
-ax2.plot(df['n'], df['bits_per_copy'], marker='s', color='#d62728', linewidth=2, linestyle='--')
-ax2.set_title('$W=0.85, \\epsilon=10^{-3}$, Bits per Copy vs $n$')
-ax2.set_xlabel('$n$ (copies)')
-ax2.set_ylabel('Bits / Copy')
-ax2.grid(True, linestyle='--', alpha=0.6)
-ax2.set_xticks(df['n'])
-plt.tight_layout()
-plt.show()
