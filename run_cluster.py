@@ -25,10 +25,10 @@ DEFAULT_CALCULATIONS = ['collision', 'min_entropy', 'classical']
 # @title **02. Shared Parameters and Solver Settings**
 # Parameter sweeps: add values to any list. All combinations are evaluated.
 W_VALUES = [0.80, 0.85, 0.9, 0.95, 1.0]                         # Example: [0.4, 0.7, 0.85]
-COLLISION_EPSILON_VALUES = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5,]          # Example: [1e-4, 1e-3, 1e-2]
-MIN_ENTROPY_EPSILON_VALUES = [math.sqrt(eps) for eps in COLLISION_EPSILON_VALUES]
-COLLISION_N_VALUES = [1, 2, 3, 4, 5, 6, 7]      # Example: list(range(1, 10))
-MIN_ENTROPY_N_VALUES = [1, 2, 3, 4, 5, 6, 7]
+COLLISION_EPSILON_VALUES = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 0]          # Example: [1e-4, 1e-3, 1e-2]
+MIN_ENTROPY_EPSILON_VALUES = list(COLLISION_EPSILON_VALUES)
+COLLISION_N_VALUES = list(range(1, 7))      # Example: list(range(1, 10))
+MIN_ENTROPY_N_VALUES = list(range(1, 7))
 
 # Classical Eve can use entropy-matched Werner cases, fixed error rates, or both.
 CLASSICAL_MODES = ['matched', 'fixed']
@@ -484,7 +484,7 @@ def solve_min_entropy_reduced(W, n, smooth_radius_squared, solver="MOSEK", tol=1
         constraints,
     )
     start = time.perf_counter()
-    problem.solve(solver=solver, verbose=verbose, **solver_options(solver, tol))
+    problem.solve(solver=solver, verbose=verbose, canon_backend=cp.SCIPY_CANON_BACKEND, **solver_options(solver, tol))
     elapsed = time.perf_counter() - start
     if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise RuntimeError(f"n={n}, radius^2={smooth_radius_squared}: {problem.status}")
@@ -515,7 +515,7 @@ def solve_min_entropy_baseline(W, n, smooth_radius_squared, solver="MOSEK", tol=
         sum(cp.trace(L) for L in Ls) >= math.sqrt(1 - smooth_radius_squared),
     ]
     problem = cp.Problem(cp.Minimize(cp.trace(S)), constraints)
-    problem.solve(solver=solver, verbose=verbose, **solver_options(solver, tol))
+    problem.solve(solver=solver, verbose=verbose, canon_backend=cp.SCIPY_CANON_BACKEND, **solver_options(solver, tol))
     if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
         raise RuntimeError(f"Solver status: {problem.status}")
     value = float(problem.value)
@@ -663,7 +663,7 @@ def apply_cli_arguments(args):
         W_VALUES = args.W
     if args.collision_epsilon is not None:
         COLLISION_EPSILON_VALUES = args.collision_epsilon
-    MIN_ENTROPY_EPSILON_VALUES = [math.sqrt(eps) for eps in COLLISION_EPSILON_VALUES]
+        MIN_ENTROPY_EPSILON_VALUES = list(COLLISION_EPSILON_VALUES)
     if args.n is not None:
         COLLISION_N_VALUES = MIN_ENTROPY_N_VALUES = args.n
     if args.classical_n is not None:
@@ -690,7 +690,7 @@ def parse_arguments():
                         default=DEFAULT_CALCULATIONS)
     parser.add_argument('--W', nargs='+', type=float, help='Werner visibility values')
     parser.add_argument('--collision-epsilon', nargs='+', type=float,
-                        help='Collision smoothing values; min-entropy values are their square roots')
+                        help='Collision smoothing values; also override the min-entropy squared-radius values')
     parser.add_argument('--n', nargs='+', type=int, help='Quantum copy counts for both calculations')
     parser.add_argument('--classical-n', nargs='+', type=int)
     parser.add_argument('--p-err', nargs='+', type=float)
