@@ -27,8 +27,8 @@ DEFAULT_CALCULATIONS = ['collision', 'min_entropy', 'classical']
 W_VALUES = [0.80, 0.85, 0.9, 0.95, 1.0]                         # Example: [0.4, 0.7, 0.85]
 COLLISION_EPSILON_VALUES = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 0]          # Example: [1e-4, 1e-3, 1e-2]
 MIN_ENTROPY_EPSILON_VALUES = list(COLLISION_EPSILON_VALUES)
-COLLISION_N_VALUES = list(range(1, 7))      # Example: list(range(1, 10))
-MIN_ENTROPY_N_VALUES = list(range(1, 7))
+COLLISION_N_VALUES = list(range(1, 8))      # Example: list(range(1, 10))
+MIN_ENTROPY_N_VALUES = list(range(1, 8))
 
 # Classical Eve can use entropy-matched Werner cases, fixed error rates, or both.
 CLASSICAL_MODES = ['matched', 'fixed']
